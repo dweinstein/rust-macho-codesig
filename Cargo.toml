@@ -1,0 +1,10 @@
+[package]
+name = "rust-macho-test"
+version = "0.1.0"
+authors = ["David Weinstein <dweinst@insitusec.com>"]
+
+[dependencies]
+mach_object = { git = "https://github.com/flier/rust-macho.git" }
+byteorder = "1.0"
+slog = "2.3.2"
+slog-bunyan = "2.1.0"

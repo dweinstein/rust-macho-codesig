@@ -1,0 +1,78 @@
+{
+    "version": "0.1.0",
+    "command": "cargo",
+    "isShellCommand": true,
+    "tasks": [
+        {
+            "taskName": "build",
+            "isBuildCommand": true,
+            "showOutput": "always",
+            "problemMatcher": {
+                "owner": "rust",
+                "fileLocation": [
+                    "relative",
+                    "${workspaceRoot}"
+                ],
+                "pattern": [
+                    {
+                        "regexp": "(error|warning)(\\[E\\d+\\])?: (.*)",
+                        "severity": 1,
+                        "code": 2,
+                        "message": 3
+                    },{
+                        "regexp": "-->\\s+([^:]*):(\\d+):(\\d+)",
+                        "file": 1,
+                        "line": 2,
+                        "column": 3
+                    }
+                ]
+            }
+        },
+        {
+            "taskName": "clean",
+            "showOutput": "always"
+        },
+        {
+            "taskName": "test",
+            "args": ["--", "--nocapture"],
+            "isTestCommand": true,
+            "showOutput": "always",
+            "problemMatcher": [
+                {
+                    "owner": "rust",
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceRoot}"
+                    ],
+                    "pattern": [
+                        {
+                            "regexp": "(error|warning)(\\[E\\d+\\])?: (.*)",
+                            "severity": 1,
+                            "code": 2,
+                            "message": 3
+                        },{
+                            "regexp": "-->\\s+([^:]*):(\\d+):(\\d+)",
+                            "file": 1,
+                            "line": 2,
+                            "column": 3
+                        }
+                    ]
+                },
+                {
+                    "owner": "rust",
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceRoot}"
+                    ],
+                    "severity": "error",
+                    "pattern": {
+                        "regexp": "^.*panicked\\s+at\\s+'(.*)',\\s+(.*):(\\d+)$",
+                        "message": 1,
+                        "file": 2,
+                        "line": 3
+                    }
+                }
+            ]
+        }
+    ]
+}
