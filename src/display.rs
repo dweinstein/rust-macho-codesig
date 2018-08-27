@@ -64,7 +64,7 @@ impl fmt::Display for CodeSignature {
                 cd.hashSize,
                 hash_type
             ),
-            _ => unimplemented!(),
+            _ => write!(f, "{:?}", self),
         }
     }
 }

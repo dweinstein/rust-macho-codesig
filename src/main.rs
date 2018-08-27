@@ -37,21 +37,30 @@ pub fn main() -> Result<(), Box<Error>> {
         "searching {binary} for macho headers/code signature command",
         binary = binary
     );
-
     let mut f = File::open(binary).unwrap();
     let mut buf = Vec::new();
     let size = f.read_to_end(&mut buf).unwrap();
-    let mut cur = Cursor::new(&buf[..size]);
 
+    let mut cur = Cursor::new(&buf[..size]);
     match OFile::parse(&mut cur) {
         Ok(OFile::MachFile {
             ref header,
             ref commands,
         }) => handle_mach_file(header, commands, &mut cur)?,
-        Ok(OFile::FatFile {
-            magic: _magic,
-            files: _files,
-        }) => unimplemented!(),
+        // Ok(OFile::FatFile { magic: _, files }) => {
+        //     files.iter().for_each(|item| {
+        //         match item {
+        //             (
+        //                 _,
+        //                 OFile::MachFile {
+        //                     ref header,
+        //                     ref commands,
+        //                 },
+        //             ) => handle_mach_file(header, commands, &mut cur),
+        //             _ => { println!("{:?}", item); Ok(()) }
+        //         }.expect("macho");
+        //     });
+        // }
         _ => unimplemented!(),
     }
 

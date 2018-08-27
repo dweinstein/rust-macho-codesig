@@ -221,7 +221,9 @@ pub enum CodeSignature {
         /// Hash value
         cd_hash: Option<String>,
     },
-    NotImplemented,
+    NotImplemented {
+        magic: u32,
+    },
 }
 
 fn read_string_to_nul<T: AsRef<[u8]>>(buf: &mut Cursor<T>) -> Result<String, Box<Error>> {
@@ -274,25 +276,25 @@ impl CodeSignature {
                     cd_hash: Some("".to_string()),
                 })
             }
-            _ => {
-                println!("println! magic: {:08x}", magic);
-                unimplemented!()
-            }
+            _ => Ok(CodeSignature::NotImplemented { magic: magic }),
         }
     }
 
     /// Sample code to locate the CodeDirectory from an embedded signature blob
-    pub fn find_code_directory(embedded: &SuperBlob) -> Result<BlobIndex, Box<Error>> {
-        if embedded.magic == CSMAGIC_EMBEDDED_SIGNATURE {
-            for idx in 0..embedded.count as usize {
-                if let Some(blob) = &embedded.index[idx] {
-                    if blob.typ == CSSLOT_CODEDIRECTORY {
-                        return Ok(blob.clone());
+    pub fn find_code_directory(blob: &SuperBlob) -> Result<BlobIndex, Box<Error>> {
+        match blob.magic {
+            0 | CSMAGIC_EMBEDDED_SIGNATURE => {
+                for idx in 0..blob.count as usize {
+                    if let Some(bi) = &blob.index[idx] {
+                        if bi.typ == CSSLOT_CODEDIRECTORY {
+                            return Ok(bi.clone());
+                        }
                     }
                 }
+                Err(From::from("No code directory"))
             }
+            _ => Err(From::from("No code directory")),
         }
-        unimplemented!()
     }
 }
 
