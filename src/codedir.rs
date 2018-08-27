@@ -8,7 +8,9 @@ use std::error::Error;
 use std::io::{BufRead, Cursor, Read, Seek, SeekFrom};
 use std::str;
 
-use consts::{CSMAGIC_EMBEDDED_SIGNATURE, CSSLOT_CODEDIRECTORY};
+use consts::{
+    CS_HASHTYPE_SHA1, CS_HASHTYPE_SHA256, CSMAGIC_EMBEDDED_SIGNATURE, CSSLOT_CODEDIRECTORY,
+};
 
 #[derive(Debug, Default, Clone)]
 pub struct SuperBlob {
@@ -168,10 +170,18 @@ impl CodeDirectory {
         })
     }
 
+    pub fn hash_type_str<'a>(&self) -> Result<&'a str, Box<Error>> {
+        match self.hashType as u32 {
+            CS_HASHTYPE_SHA1 => Ok("SHA-1"),
+            CS_HASHTYPE_SHA256 => Ok("SHA-256"),
+            _ => unimplemented!(),
+        }
+    }
+
     pub fn team_id<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<String, Box<Error>> {
         cond!(
             self.version >= supportsTeamID => {
-                buf.seek(SeekFrom::Current(self.teamIDOffset as i64))?;
+                // buf.seek(SeekFrom::Current(self.teamIDOffset as i64))?;
                 let team_id = read_string_to_nul(buf)?;
                 Ok(team_id)
             }
@@ -190,6 +200,12 @@ impl CodeDirectory {
 #[derive(Debug, Clone)]
 pub enum CodeSignature {
     Parsed {
+        /// Magic type
+        magic: u32,
+        /// Offset
+        offset: u32,
+        /// Size
+        size: u32,
         /// SuperBlob
         super_blob: Option<SuperBlob>,
         /// BlobIndex for CodeDirectory
@@ -198,6 +214,12 @@ pub enum CodeSignature {
         code_directory: Option<CodeDirectory>,
         /// Identifier string
         identifier: Option<String>,
+        /// Team Identifier
+        team_id: Option<String>,
+        /// Hash Type
+        hash_type: Option<String>,
+        /// Hash value
+        cd_hash: Option<String>,
     },
     NotImplemented,
 }
@@ -210,7 +232,11 @@ fn read_string_to_nul<T: AsRef<[u8]>>(buf: &mut Cursor<T>) -> Result<String, Box
 
 impl CodeSignature {
     /// Parse a code signature
-    pub fn parse<T: AsRef<[u8]>>(buf: &mut Cursor<T>) -> Result<CodeSignature, Box<Error>> {
+    pub fn parse<T: AsRef<[u8]>>(
+        offset: u32,
+        size: u32,
+        buf: &mut Cursor<T>,
+    ) -> Result<CodeSignature, Box<Error>> {
         let pos = buf.position();
         let magic = buf.read_u32::<BigEndian>()?;
         match magic {
@@ -222,6 +248,7 @@ impl CodeSignature {
                 let blob = CodeSignature::find_code_directory(&sb)?;
                 let cd_offset = blob.offset;
 
+                buf.set_position(pos);
                 buf.seek(SeekFrom::Current(cd_offset as i64))?;
                 let cd = CodeDirectory::parse::<BigEndian, Cursor<T>>(buf)?;
 
@@ -229,11 +256,22 @@ impl CodeSignature {
                 buf.seek(SeekFrom::Current((cd_offset + cd.identOffset) as i64))?;
                 let identifier = read_string_to_nul(buf)?;
 
+                buf.seek(SeekFrom::Current(cd.teamIDOffset as i64))?;
+                let team_id = cd.team_id(buf)?;
+
+                let hash_type = cd.hash_type_str()?.to_string();
+
                 Ok(CodeSignature::Parsed {
+                    magic,
+                    offset,
+                    size,
                     super_blob: Some(sb),
                     cd_blob_idx: Some(blob),
                     code_directory: Some(cd),
                     identifier: Some(identifier),
+                    team_id: Some(team_id),
+                    hash_type: Some(hash_type),
+                    cd_hash: Some("".to_string()),
                 })
             }
             _ => {

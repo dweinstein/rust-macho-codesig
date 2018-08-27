@@ -74,43 +74,8 @@ fn handle_mach_file<T: AsRef<[u8]>>(
                 i, link.off, link.size
             );
             cur.set_position(link.off as u64);
-            let cs = CodeSignature::parse(cur)?;
-            if let CodeSignature::Parsed {
-                super_blob: Some(sb),
-                cd_blob_idx: Some(bi),
-                code_directory: Some(cd),
-                identifier: Some(identifier),
-                ..
-            } = &cs
-            {
-                let team_id = cd.team_id(cur);
-                let hash_type = match cd.hashType as u32 {
-                    consts::CS_HASHTYPE_SHA1 => "SHA-1",
-                    consts::CS_HASHTYPE_SHA256 => "SHA-256",
-                    _ => unimplemented!(),
-                };
-                cur.set_position(link.off as u64);
-                // let hash_str = cd.cd_hash(cur)?;
-                println!("Blob at offset {} ({} bytes) {}", link.off, link.size, sb);
-                println!(
-                    "        Blob 0: Type: {} @{}: Code Directory ({} bytes)",
-                    bi.typ, bi.offset, cd.length
-                );
-                println!("                Version:     {:x}", cd.version);
-                println!("                Flags:       {} (0x{:x})", "none", cd.flags);
-                println!("                CodeLimit:   0x{:x}", cd.codeLimit);
-                println!("                Identifier:  {}", identifier);
-                println!("                Team ID:     {:?}", team_id);
-                println!("                CDHash:      {:?}", Some("TODO")); // XXX: BROKEN
-                println!(
-                    "                # of Hashes: {} code + {} special",
-                    cd.nCodeSlots, cd.nSpecialSlots
-                );
-                println!(
-                    "                Hashes @{} size: {} Type: {}",
-                    cd.hashOffset, cd.hashSize, hash_type
-                );
-            }
+            let cs = CodeSignature::parse(link.off, link.size, cur)?;
+            println!("{}", cs);
         }
     }
 
