@@ -200,7 +200,7 @@ impl CodeDirectory {
 #[derive(Debug, Clone)]
 pub enum CodeSignature {
     Embedded {
-        /// Magic type
+        /// Magic type ([`const::CSMAGIC_EMBEDDED_SIGNATURE`](../consts/constant.CSMAGIC_EMBEDDED_SIGNATURE.html))
         magic: u32,
         /// Offset
         offset: u32,
@@ -208,7 +208,7 @@ pub enum CodeSignature {
         size: u32,
         /// SuperBlob
         super_blob: Option<SuperBlob>,
-        /// BlobIndex for CodeDirectory
+        /// `BlobIndex` for `CodeDirectory`
         cd_blob_idx: Option<BlobIndex>,
         /// `CodeDirectory`
         code_directory: Option<CodeDirectory>,
@@ -216,7 +216,7 @@ pub enum CodeSignature {
         identifier: Option<String>,
         /// Team Identifier
         team_id: Option<String>,
-        /// Hash Type
+        /// Hash Type (see `hash_type_str`)
         hash_type: Option<String>,
         /// Hash value
         cd_hash: Option<String>,
