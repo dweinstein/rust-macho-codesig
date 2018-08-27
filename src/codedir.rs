@@ -199,7 +199,7 @@ impl CodeDirectory {
 
 #[derive(Debug, Clone)]
 pub enum CodeSignature {
-    Parsed {
+    Embedded {
         /// Magic type
         magic: u32,
         /// Offset
@@ -261,7 +261,7 @@ impl CodeSignature {
 
                 let hash_type = cd.hash_type_str()?.to_string();
 
-                Ok(CodeSignature::Parsed {
+                Ok(CodeSignature::Embedded {
                     magic,
                     offset,
                     size,

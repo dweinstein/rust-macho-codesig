@@ -20,7 +20,7 @@ impl fmt::Display for SuperBlob {
 impl fmt::Display for CodeSignature {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CodeSignature::Parsed {
+            CodeSignature::Embedded {
                 magic: CSMAGIC_EMBEDDED_SIGNATURE,
                 offset,
                 size,
