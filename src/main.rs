@@ -84,7 +84,7 @@ fn handle_mach_file<T: AsRef<[u8]>>(
             );
             cur.set_position(link.off as u64);
             let cs = CodeSignature::parse(link.off, link.size, cur)?;
-            println!("{}", cs);
+            println!("{:?}", cs);
         }
     }
 
