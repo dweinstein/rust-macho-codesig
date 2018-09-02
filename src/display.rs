@@ -25,7 +25,7 @@ impl fmt::Display for CodeSignature {
                 size,
                 super_blob: Some(sb),
                 cd_blob_idx: _cd_blob_idx,
-                blobs: _blobs
+                blobs: _blobs,
             } => {
                 write!(f, "Blob at offset {} ({} bytes) is an embedded signature of {} bytes, and {} blobs ", offset, size, sb.length, sb.count)?;
                 //                 write!(
@@ -59,7 +59,7 @@ impl fmt::Display for CodeSignature {
             }
 
             // _ => write!(f, "{:?}", self),
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 }

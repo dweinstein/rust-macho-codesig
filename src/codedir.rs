@@ -148,14 +148,6 @@ impl SuperBlob {
     }
 }
 
-macro_rules! cond(
-    ($($pred:expr => $body:block),+ _ => $default:block) => (
-        $(if $pred $body else)+
-
-        $default
-    )
-);
-
 impl CodeDirectory {
     pub fn parse<O: ByteOrder, T: BufRead>(buf: &mut T) -> Result<CodeDirectory> {
         let magic = buf.read_u32::<O>()?;
@@ -172,7 +164,12 @@ impl CodeDirectory {
         let platform = buf.read_u8()?;
         let pageSize = buf.read_u8()?;
         let spare2 = buf.read_u32::<O>()?;
-        let scatterOffset = buf.read_u32::<O>()?;
+
+        let scatterOffset = if version >= supportsScatter {
+            buf.read_u32::<O>()?
+        } else {
+            0
+        };
 
         let teamIDOffset = if version >= supportsTeamID {
             buf.read_u32::<O>()?
@@ -209,14 +206,12 @@ impl CodeDirectory {
         }
     }
 
-    pub fn team_id<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<String> {
-        cond!(
-            self.version >= supportsTeamID => {
-                let team_id = read_string_to_nul(buf)?;
-                Ok(team_id)
-            }
-            _ => { Err(TeamIDNotSupportedVersion(self.version).into()) }
-        )
+    fn team_id<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<String> {
+        if self.version >= supportsTeamID {
+            Ok(read_string_to_nul(buf)?)
+        } else {
+            Err(TeamIDNotSupportedVersion(self.version).into())
+        }
     }
 
     pub fn cd_hash<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<u8>> {
@@ -242,10 +237,18 @@ pub enum Blob {
         /// CodeDirectory Hash value (CDHash)
         cd_hash: Result<Vec<u8>>,
     },
-    Requirements  { index: BlobIndex },
-    Entitlements  { index: BlobIndex },
-    Signed        { index: BlobIndex },
-    Unknown       { index: BlobIndex },
+    Requirements {
+        index: BlobIndex,
+    },
+    Entitlements {
+        index: BlobIndex,
+    },
+    Signed {
+        index: BlobIndex,
+    },
+    Unknown {
+        index: BlobIndex,
+    },
 }
 
 #[derive(Debug)]
@@ -297,7 +300,6 @@ impl CodeSignature {
                 let mut cd_blob_idx: Option<BlobIndex> = None;
 
                 for idx in 0..super_blob.count as usize {
-                    // println!("\n\n");
                     if let Some(bi) = &super_blob.index[idx] {
                         buf.set_position((offset + bi.offset) as u64);
                         println!(
@@ -348,6 +350,7 @@ impl CodeSignature {
                                     buf.position() - offset as u64,
                                     cd.hashOffset
                                 );
+                                buf.set_position((offset + bi.offset + cd.hashOffset) as u64);
                                 let cd_hash = cd.cd_hash(buf);
                                 println!(
                                     "+ cdhash: {} {}",
@@ -357,10 +360,10 @@ impl CodeSignature {
                                 blobs.push(Blob::CodeDirectory {
                                     index: bi.clone(),
                                     code_directory: cd,
-                                    identifier: Ok(identifier?.clone()),
-                                    team_id: Ok(team_id?.clone()),
+                                    identifier: identifier,
+                                    team_id: team_id,
                                     hash_type: hash_type,
-                                    cd_hash: Ok(cd_hash?.clone())
+                                    cd_hash: Ok(cd_hash?.clone()),
                                 });
                             }
                             CSMAGIC_BLOBWRAPPER => {
@@ -384,7 +387,7 @@ impl CodeSignature {
                         };
                     };
                     println!("\n\n");
-                };
+                }
                 Ok(CodeSignature::Embedded {
                     offset,
                     size,

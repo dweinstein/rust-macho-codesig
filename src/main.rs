@@ -9,16 +9,6 @@ extern crate byteorder;
 extern crate hex;
 extern crate mach_object;
 
-use mach_object::MachHeader;
-use slog::Drain;
-
-use mach_object::{LoadCommand, MachCommand, OFile};
-use std::env;
-use std::error::Error;
-use std::fs::File;
-use std::io::{Cursor, Read};
-use std::sync::Mutex;
-
 pub mod codedir;
 pub mod consts;
 pub mod display;
@@ -26,9 +16,19 @@ pub mod errors;
 
 pub use codedir::*;
 pub use consts::*;
-// pub use errors::{CDMachError::*, *};
+pub use mach_object::MachHeader;
 
-pub fn main() -> Result<(), Box<std::io::Error>> {
+use slog::Drain;
+
+use mach_object::{LoadCommand, MachCommand, OFile};
+use std::env;
+use std::fs::File;
+use std::io::{Cursor, Read};
+use std::sync::Mutex;
+
+use errors::Result;
+
+pub fn main() -> Result<()> {
     let root = slog::Logger::root(
         Mutex::new(slog_bunyan::default(std::io::stdout())).fuse(),
         o!("name" => "codesign"),
@@ -48,11 +48,8 @@ pub fn main() -> Result<(), Box<std::io::Error>> {
     let size = f.read_to_end(&mut buf).unwrap();
 
     let mut cur = Cursor::new(&buf[..size]);
-    match OFile::parse(&mut cur) {
-        Ok(OFile::MachFile {
-            ref header,
-            ref commands,
-        }) => handle_mach_file(header, commands, &mut cur).unwrap(),
+    match &OFile::parse(&mut cur) {
+        Ok(OFile::MachFile { header, commands }) => handle_mach_file(header, commands, &mut cur)?,
         // Ok(OFile::FatFile { magic: _, files }) => {
         //     files.iter().for_each(|item| {
         //         match item {
@@ -77,7 +74,7 @@ fn handle_mach_file<T: AsRef<[u8]>>(
     header: &MachHeader,
     commands: &Vec<MachCommand>,
     cur: &mut Cursor<T>,
-) -> Result<(), Box<Error>> {
+) -> Result<()> {
     assert_eq!(header.ncmds as usize, commands.len());
 
     println!("macho header: {:?}", header);
@@ -92,16 +89,12 @@ fn handle_mach_file<T: AsRef<[u8]>>(
             let cs = CodeSignature::lc_code_sig(link.off, link.size, cur)?;
             // println!("{:?}", cs);
             println!("display CodeSignature: {}\n\n", cs);
-            if let CodeSignature::Embedded {
-                blobs,
-                ..
-            } = cs {
+            if let CodeSignature::Embedded { blobs, .. } = cs {
                 blobs.iter().for_each(|blob| {
                     println!("{:?}\n\n", blob);
                 })
             }
         }
     }
-
     Ok(())
 }
