@@ -3,13 +3,17 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
-use std::error::Error;
+use byteorder::{ByteOrder, NetworkEndian, ReadBytesExt};
+use hex;
 use std::io::{BufRead, Cursor, Read, Seek, SeekFrom};
 use std::str;
 
+use errors::{CDMachError::*, Result};
+
 use consts::{
-    CS_HASHTYPE_SHA1, CS_HASHTYPE_SHA256, CSMAGIC_EMBEDDED_SIGNATURE, CSMAGIC_CODEDIRECTORY, CSMAGIC_REQUIREMENTS, CSSLOT_CODEDIRECTORY,
+    CS_HASHTYPE_SHA1, CS_HASHTYPE_SHA256, CSMAGIC_BLOBWRAPPER, CSMAGIC_CODEDIRECTORY,
+    CSMAGIC_EMBEDDED_ENTITLEMENTS, CSMAGIC_EMBEDDED_SIGNATURE, CSMAGIC_REQUIREMENTS,
+    CSSLOT_CODEDIRECTORY,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -101,10 +105,9 @@ pub struct CodeDirectory {
     pub execSegLimit: u64,
     /// exec segment flags
     pub execSegFlags: u64,
-
-    pub identifier: Option<String>,
-    pub team_id: Option<String>,
-    pub cd_hash: Option<String>,
+    // pub identifier: Option<String>,
+    // pub team_id: Option<String>,
+    // pub cd_hash: Option<String>,
 }
 
 /// earliest supported version
@@ -127,7 +130,7 @@ pub struct BlobIndex {
 }
 
 impl SuperBlob {
-    pub fn parse<O: ByteOrder, T: BufRead>(buf: &mut T) -> Result<SuperBlob, Box<Error>> {
+    pub fn parse<O: ByteOrder, T: BufRead>(buf: &mut T) -> Result<SuperBlob> {
         let mut sb = SuperBlob {
             magic: buf.read_u32::<O>()?,
             length: buf.read_u32::<O>()?,
@@ -154,27 +157,51 @@ macro_rules! cond(
 );
 
 impl CodeDirectory {
-    pub fn parse<O: ByteOrder, T: BufRead>(buf: &mut T) -> Result<CodeDirectory, Box<Error>> {
+    pub fn parse<O: ByteOrder, T: BufRead>(buf: &mut T) -> Result<CodeDirectory> {
+        let magic = buf.read_u32::<O>()?;
+        let length = buf.read_u32::<O>()?;
+        let version = buf.read_u32::<O>()?;
+        let flags = buf.read_u32::<O>()?;
+        let hashOffset = buf.read_u32::<O>()?;
+        let identOffset = buf.read_u32::<O>()?;
+        let nSpecialSlots = buf.read_u32::<O>()?;
+        let nCodeSlots = buf.read_u32::<O>()?;
+        let codeLimit = buf.read_u32::<O>()?;
+        let hashSize = buf.read_u8()?;
+        let hashType = buf.read_u8()?;
+        let platform = buf.read_u8()?;
+        let pageSize = buf.read_u8()?;
+        let spare2 = buf.read_u32::<O>()?;
+        let scatterOffset = buf.read_u32::<O>()?;
+
+        let teamIDOffset = if version >= supportsTeamID {
+            buf.read_u32::<O>()?
+        } else {
+            0
+        };
+
         Ok(CodeDirectory {
-            magic: buf.read_u32::<O>()?,
-            length: buf.read_u32::<O>()?,
-            version: buf.read_u32::<O>()?,
-            flags: buf.read_u32::<O>()?,
-            hashOffset: buf.read_u32::<O>()?,
-            identOffset: buf.read_u32::<O>()?,
-            nSpecialSlots: buf.read_u32::<O>()?,
-            nCodeSlots: buf.read_u32::<O>()?,
-            codeLimit: buf.read_u32::<O>()?,
-            hashSize: buf.read_u8()?,
-            hashType: buf.read_u8()?,
-            platform: buf.read_u8()?,
-            pageSize: buf.read_u8()?,
-            spare2: buf.read_u32::<O>()?,
+            magic,
+            length,
+            version,
+            flags,
+            hashOffset,
+            identOffset,
+            nSpecialSlots,
+            nCodeSlots,
+            codeLimit,
+            hashSize,
+            hashType,
+            platform,
+            pageSize,
+            spare2,
+            scatterOffset,
+            teamIDOffset,
             ..Default::default()
         })
     }
 
-    pub fn hash_type_str<'a>(&self) -> Result<&'a str, Box<Error>> {
+    pub fn hash_type_str<'a>(&self) -> Result<&'a str> {
         match self.hashType as u32 {
             CS_HASHTYPE_SHA1 => Ok("SHA-1"),
             CS_HASHTYPE_SHA256 => Ok("SHA-256"),
@@ -182,32 +209,47 @@ impl CodeDirectory {
         }
     }
 
-    pub fn team_id<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<String, Box<Error>> {
+    pub fn team_id<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<String> {
         cond!(
             self.version >= supportsTeamID => {
-                // buf.seek(SeekFrom::Current(self.teamIDOffset as i64))?;
                 let team_id = read_string_to_nul(buf)?;
                 Ok(team_id)
             }
-            _ => { Err(From::from("team id not supported in version")) }
+            _ => { Err(TeamIDNotSupportedVersion(self.version).into()) }
         )
     }
 
-    pub fn cd_hash<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<u8>, Box<Error>> {
-        buf.seek(SeekFrom::Current(self.hashOffset as i64))?;
-        let mut hash_buf = vec![0u8; 160 / 8];
+    pub fn cd_hash<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<u8>> {
+        let mut hash_buf = vec![0u8; self.hashSize as usize];
         buf.read_exact(&mut hash_buf)?;
         Ok(hash_buf)
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum CodeSignature {
-    Directory {
+#[derive(Debug)]
+pub enum Blob {
+    CodeDirectory {
+        /// `BlobIndex`
+        index: BlobIndex,
+        /// `CodeDirectory`
         code_directory: CodeDirectory,
-        identifier: Option<String>,
-        team_id: Option<String>,
+        /// Identifier string
+        identifier: Result<String>,
+        /// Team Identifier
+        team_id: Result<String>,
+        /// Hash Type (e.g., "SHA-1", "SHA-256")
+        hash_type: Option<String>,
+        /// CodeDirectory Hash value (CDHash)
+        cd_hash: Result<Vec<u8>>,
     },
+    Requirements  { index: BlobIndex },
+    Entitlements  { index: BlobIndex },
+    Signed        { index: BlobIndex },
+    Unknown       { index: BlobIndex },
+}
+
+#[derive(Debug)]
+pub enum CodeSignature {
     Embedded {
         /// Offset
         offset: u32,
@@ -217,108 +259,138 @@ pub enum CodeSignature {
         super_blob: Option<SuperBlob>,
         /// `BlobIndex` for `CodeDirectory`
         cd_blob_idx: Option<BlobIndex>,
-        /// `CodeDirectory`
-        code_directory: Vec<CodeDirectory>,
-        /// Identifier string
-        identifier: Option<String>,
-        /// Team Identifier
-        team_id: Option<String>,
-        /// Hash Type (see `hash_type_str`)
-        hash_type: Option<String>,
-        /// CodeDirectory Hash value (CDHash)
-        cd_hash: Option<String>,
-        /// Entitlements CDHash
-        entitlements_cd_hash: Option<String>,
+        /// Vector of `Blob` objects
+        blobs: Vec<Blob>,
     },
     NotImplemented {
         magic: u32,
     },
 }
 
-fn read_string_to_nul<T: AsRef<[u8]>>(buf: &mut Cursor<T>) -> Result<String, Box<Error>> {
+fn read_string_to_nul<T: AsRef<[u8]>>(buf: &mut Cursor<T>) -> Result<String> {
     let mut ident = vec![];
     let sz = buf.read_until(0x00, &mut ident)?;
     Ok(str::from_utf8(&ident[0..sz - 1])?.to_string())
 }
 
 impl CodeSignature {
+    /// Load code signatures
+    pub fn load_code_signatures(_path: &str) -> Result<Vec<CodeSignature>> {
+        unimplemented!()
+    }
+
     /// Parse a code signature
-    pub fn parse<T: AsRef<[u8]>>(
+    pub fn lc_code_sig<T: AsRef<[u8]>>(
         offset: u32,
         size: u32,
         buf: &mut Cursor<T>,
-    ) -> Result<CodeSignature, Box<Error>> {
-        let pos = buf.position();
-        let magic = buf.read_u32::<BigEndian>()?;
+    ) -> Result<CodeSignature> {
+        let _pos = buf.position();
+        let magic = buf.read_u32::<NetworkEndian>()?;
+        buf.seek(SeekFrom::Current(-4))?;
 
         match magic {
             CSMAGIC_EMBEDDED_SIGNATURE => {
-                buf.seek(SeekFrom::Current(-4))?;
-                let super_blob = SuperBlob::parse::<BigEndian, Cursor<T>>(buf)?;
+                let super_blob = SuperBlob::parse::<NetworkEndian, Cursor<T>>(buf)?;
 
-                let mut code_directory: Vec<CodeDirectory> = vec![];
+                let mut blobs: Vec<Blob> = vec![];
                 let mut cd_blob_idx: Option<BlobIndex> = None;
-                let mut identifier: Option<String> = None;
-                let mut team_id: Option<String> = None;
-                let mut hash_type: Option<String> = None;
 
                 for idx in 0..super_blob.count as usize {
+                    // println!("\n\n");
                     if let Some(bi) = &super_blob.index[idx] {
                         buf.set_position((offset + bi.offset) as u64);
-                        println!("blob index: typ {:?} @{}, byte offset {:?}", bi.typ, bi.offset, offset + bi.offset);
-                        let magic = buf.read_u32::<BigEndian>()?;
+                        println!(
+                            "=== blob index: typ {:?} @{}, byte offset {:?} ===",
+                            bi.typ,
+                            bi.offset,
+                            offset + bi.offset
+                        );
+
+                        let magic = buf.read_u32::<NetworkEndian>()?;
+                        let length = buf.read_u32::<NetworkEndian>()?;
+                        buf.seek(SeekFrom::Current(-8))?;
                         match magic {
                             CSMAGIC_REQUIREMENTS => {
-                                 println!("requirements {:?} {:?}", bi, magic);
+                                println!(
+                                    "> CSMAGIC_REQUIREMENTS {:?} {:x?} len: {}",
+                                    bi, magic, length
+                                );
+                                blobs.push(Blob::Requirements { index: bi.clone() });
                             }
                             CSMAGIC_CODEDIRECTORY => {
-                                println!("CD HANDLED! bi magic: {:x?}", magic);
-                                buf.seek(SeekFrom::Current(-4))?;
-                                let cd = CodeDirectory::parse::<BigEndian, Cursor<T>>(buf)?;
-                                println!("CD {:?}", cd);
+                                println!(
+                                    "> CSMAGIC_CODEDIRECTORY {:?} {:x?} len: {}",
+                                    bi, magic, length
+                                );
+                                cd_blob_idx = Some(bi.clone());
+                                let cd = CodeDirectory::parse::<NetworkEndian, Cursor<T>>(buf)?;
+                                println!(
+                                    "+ CD.length {} bytes; end of cd {}/{}?",
+                                    cd.length,
+                                    buf.position(),
+                                    buf.position() - offset as u64 - bi.offset as u64
+                                );
                                 buf.set_position((offset + bi.offset + cd.identOffset) as u64);
-                                identifier = Some(read_string_to_nul(buf)?);
+                                let identifier = read_string_to_nul(buf);
+                                buf.set_position((offset + bi.offset + cd.teamIDOffset) as u64);
                                 // buf.seek(SeekFrom::Current(cd.teamIDOffset as i64))?;
-                                team_id = Some(cd.team_id(buf)?);
-                                hash_type = Some(cd.hash_type_str()?.to_string());
-                                code_directory.push(cd);
+                                let team_id = cd.team_id(buf);
+                                let hash_type = Some(cd.hash_type_str()?.to_string());
+                                // println!("maybe cd offset: {}", buf.position() - offset as u64);
+                                // buf.set_position((offset + bi.offset + cd.length) as u64);
+                                // buf.set_position(offset as u64);
+                                // buf.seek(SeekFrom::Current(
+                                //     cd.length as i64 + cd.hashOffset as i64,
+                                // ))?;
+                                println!(
+                                    "+ reading cd hash @ {} (hashOffset is: {})",
+                                    buf.position() - offset as u64,
+                                    cd.hashOffset
+                                );
+                                let cd_hash = cd.cd_hash(buf);
+                                println!(
+                                    "+ cdhash: {} {}",
+                                    hash_type.as_ref().unwrap(),
+                                    hex::encode(cd_hash.as_ref().unwrap())
+                                );
+                                blobs.push(Blob::CodeDirectory {
+                                    index: bi.clone(),
+                                    code_directory: cd,
+                                    identifier: Ok(identifier?.clone()),
+                                    team_id: Ok(team_id?.clone()),
+                                    hash_type: hash_type,
+                                    cd_hash: Ok(cd_hash?.clone())
+                                });
+                            }
+                            CSMAGIC_BLOBWRAPPER => {
+                                println!(
+                                    "> CSMAGIC_BLOBWRAPPER {:?} {:x?} len: {}",
+                                    bi, magic, length
+                                );
+                                blobs.push(Blob::Signed { index: bi.clone() });
+                            }
+                            CSMAGIC_EMBEDDED_ENTITLEMENTS => {
+                                println!(
+                                    "> CSMAGIC_EMBEDDED_ENTITLEMENETS {:?} {:x?} len: {}",
+                                    bi, magic, length
+                                );
+                                blobs.push(Blob::Entitlements { index: bi.clone() });
                             }
                             _ => {
-                                 println!("unhandled bi magic: {:?} {:x?}", bi, magic);
-                                 // Ok(CodeSignature::NotImplemented { magic })
+                                println!("! UNHANDLED {:?} {:x?} len: {}", bi, magic, length);
+                                blobs.push(Blob::Unknown { index: bi.clone() });
                             }
-                        }
-                    }
-                }
-
-                // buf.set_position(pos);
-                // let blob = CodeSignature::find_code_directory(&sb)?;
-                // let cd_offset = blob.offset;
-
-                // buf.set_position(pos);
-                // buf.seek(SeekFrom::Current(cd_offset as i64))?;
-                // let cd = CodeDirectory::parse::<BigEndian, Cursor<T>>(buf)?;
-
-                // buf.set_position(pos);
-                // buf.seek(SeekFrom::Current((cd_offset + cd.identOffset) as i64))?;
-                // let identifier = read_string_to_nul(buf)?;
-
-                // buf.seek(SeekFrom::Current(cd.teamIDOffset as i64))?;
-                // let team_id = cd.team_id(buf)?;
-
-                // let hash_type = cd.hash_type_str()?.to_string();
-
+                        };
+                    };
+                    println!("\n\n");
+                };
                 Ok(CodeSignature::Embedded {
                     offset,
                     size,
                     super_blob: Some(super_blob),
                     cd_blob_idx: cd_blob_idx,
-                    code_directory: code_directory,
-                    identifier: identifier,
-                    team_id: team_id,
-                    hash_type: hash_type,
-                    cd_hash: Some("".to_string()),
-                    entitlements_cd_hash: Some("".to_string()),
+                    blobs: blobs,
                 })
             }
             _ => Ok(CodeSignature::NotImplemented { magic: magic }),
@@ -326,9 +398,9 @@ impl CodeSignature {
     }
 
     /// Sample code to locate the CodeDirectory from an embedded signature blob
-    pub fn find_code_directory(blob: &SuperBlob) -> Result<BlobIndex, Box<Error>> {
+    pub fn find_code_directory(blob: &SuperBlob) -> Result<BlobIndex> {
         match blob.magic {
-            CSMAGIC_EMBEDDED_SIGNATURE=> {
+            CSMAGIC_EMBEDDED_SIGNATURE => {
                 for idx in 0..blob.count as usize {
                     if let Some(bi) = &blob.index[idx] {
                         if bi.typ == CSSLOT_CODEDIRECTORY {
@@ -336,9 +408,9 @@ impl CodeSignature {
                         }
                     }
                 }
-                Err(From::from("No code directory"))
+                Err(NoCodeDirectory.into())
             }
-            _ => Err(From::from("No code directory")),
+            _ => Err(NoCodeDirectory.into()),
         }
     }
 }

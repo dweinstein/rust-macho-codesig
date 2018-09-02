@@ -15,6 +15,8 @@ pub const CSMAGIC_EMBEDDED_SIGNATURE: u32 = 0xfade0cc0;
 pub const CSMAGIC_DETACHED_SIGNATURE: u32 = 0xfade0cc1;
 /// used for the cms blob
 pub const CSMAGIC_BLOBWRAPPER: u32 = 0xfade0b01;
+/// used for Entitlements blob
+pub const CSMAGIC_EMBEDDED_ENTITLEMENTS: u32 = 0xfade7171;
 
 pub const CS_PAGE_SIZE: u32 = 4096;
 

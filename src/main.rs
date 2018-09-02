@@ -2,7 +2,11 @@
 extern crate slog;
 extern crate slog_bunyan;
 
+#[macro_use]
+extern crate failure;
+
 extern crate byteorder;
+extern crate hex;
 extern crate mach_object;
 
 use mach_object::MachHeader;
@@ -18,11 +22,13 @@ use std::sync::Mutex;
 pub mod codedir;
 pub mod consts;
 pub mod display;
+pub mod errors;
 
 pub use codedir::*;
 pub use consts::*;
+// pub use errors::{CDMachError::*, *};
 
-pub fn main() -> Result<(), Box<Error>> {
+pub fn main() -> Result<(), Box<std::io::Error>> {
     let root = slog::Logger::root(
         Mutex::new(slog_bunyan::default(std::io::stdout())).fuse(),
         o!("name" => "codesign"),
@@ -46,7 +52,7 @@ pub fn main() -> Result<(), Box<Error>> {
         Ok(OFile::MachFile {
             ref header,
             ref commands,
-        }) => handle_mach_file(header, commands, &mut cur)?,
+        }) => handle_mach_file(header, commands, &mut cur).unwrap(),
         // Ok(OFile::FatFile { magic: _, files }) => {
         //     files.iter().for_each(|item| {
         //         match item {
@@ -83,8 +89,17 @@ fn handle_mach_file<T: AsRef<[u8]>>(
                 i, link.off, link.size
             );
             cur.set_position(link.off as u64);
-            let cs = CodeSignature::parse(link.off, link.size, cur)?;
-            println!("{:?}", cs);
+            let cs = CodeSignature::lc_code_sig(link.off, link.size, cur)?;
+            // println!("{:?}", cs);
+            println!("display CodeSignature: {}\n\n", cs);
+            if let CodeSignature::Embedded {
+                blobs,
+                ..
+            } = cs {
+                blobs.iter().for_each(|blob| {
+                    println!("{:?}\n\n", blob);
+                })
+            }
         }
     }
 
