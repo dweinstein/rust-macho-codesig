@@ -57,9 +57,8 @@ impl fmt::Display for CodeSignature {
                 //                 )?;
                 Ok(())
             }
-
-            // _ => write!(f, "{:?}", self),
-            _ => unimplemented!(),
+            _ => write!(f, "{:?}", self),
+            // _ => unimplemented!(),
         }
     }
 }

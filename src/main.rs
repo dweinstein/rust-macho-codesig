@@ -50,20 +50,21 @@ pub fn main() -> Result<()> {
     let mut cur = Cursor::new(&buf[..size]);
     match &OFile::parse(&mut cur) {
         Ok(OFile::MachFile { header, commands }) => handle_mach_file(header, commands, &mut cur)?,
-        // Ok(OFile::FatFile { magic: _, files }) => {
-        //     files.iter().for_each(|item| {
-        //         match item {
-        //             (
-        //                 _,
-        //                 OFile::MachFile {
-        //                     ref header,
-        //                     ref commands,
-        //                 },
-        //             ) => handle_mach_file(header, commands, &mut cur),
-        //             _ => { println!("{:?}", item); Ok(()) }
-        //         }.expect("macho");
-        //     });
-        // }
+        Ok(OFile::FatFile { magic, files }) => {
+            println!("FAT magic: 0x{:x}, files: {:?}", magic, files);
+            files.iter().for_each(|item| {
+                match &item {
+                    (
+                        _,
+                        OFile::MachFile {
+                            header,
+                            commands,
+                        },
+                    ) => handle_mach_file(header, commands, &mut cur),
+                    _ => { println!("{:?}", item); Ok(()) }
+                }.expect("macho");
+            });
+        }
         _ => unimplemented!(),
     }
 
@@ -80,7 +81,7 @@ fn handle_mach_file<T: AsRef<[u8]>>(
     println!("macho header: {:?}", header);
 
     for (i, &MachCommand(ref cmd, _cmdsize)) in commands.iter().enumerate() {
-        if let &LoadCommand::CodeSignature { 0: ref link } = cmd {
+        if let LoadCommand::CodeSignature { 0: link } = &cmd {
             println!(
                 "LC {}: LC_CODE_SIGNATURE        Offset: {}, Size: {}",
                 i, link.off, link.size
@@ -92,7 +93,7 @@ fn handle_mach_file<T: AsRef<[u8]>>(
             if let CodeSignature::Embedded { blobs, .. } = cs {
                 blobs.iter().for_each(|blob| {
                     println!("{:?}\n\n", blob);
-                })
+                });
             }
         }
     }

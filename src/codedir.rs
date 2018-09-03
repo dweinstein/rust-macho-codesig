@@ -105,9 +105,6 @@ pub struct CodeDirectory {
     pub execSegLimit: u64,
     /// exec segment flags
     pub execSegFlags: u64,
-    // pub identifier: Option<String>,
-    // pub team_id: Option<String>,
-    // pub cd_hash: Option<String>,
 }
 
 /// earliest supported version
@@ -219,6 +216,15 @@ impl CodeDirectory {
         buf.read_exact(&mut hash_buf)?;
         Ok(hash_buf)
     }
+
+    pub fn cd_hashes<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<String>> {
+        (-(self.nSpecialSlots as i32)..self.nCodeSlots as i32).for_each(|i| {
+            println!("{} {}", i, hex::encode(self.cd_hash(buf).unwrap()));
+        });
+        Ok(vec![])
+    }
+
+    // pub fn canonical_slot_name()
 }
 
 #[derive(Debug)]
@@ -242,9 +248,12 @@ pub enum Blob {
     },
     Entitlements {
         index: BlobIndex,
+        entitlements_hash: Vec<u8>,
+        entitlements: Vec<u8>
     },
-    Signed {
+    SignedData {
         index: BlobIndex,
+        data: Vec<u8>,
     },
     Unknown {
         index: BlobIndex,
@@ -286,7 +295,7 @@ impl CodeSignature {
     pub fn lc_code_sig<T: AsRef<[u8]>>(
         offset: u32,
         size: u32,
-        buf: &mut Cursor<T>,
+        buf: &mut Cursor<T>
     ) -> Result<CodeSignature> {
         let _pos = buf.position();
         let magic = buf.read_u32::<NetworkEndian>()?;
@@ -336,15 +345,8 @@ impl CodeSignature {
                                 buf.set_position((offset + bi.offset + cd.identOffset) as u64);
                                 let identifier = read_string_to_nul(buf);
                                 buf.set_position((offset + bi.offset + cd.teamIDOffset) as u64);
-                                // buf.seek(SeekFrom::Current(cd.teamIDOffset as i64))?;
                                 let team_id = cd.team_id(buf);
                                 let hash_type = Some(cd.hash_type_str()?.to_string());
-                                // println!("maybe cd offset: {}", buf.position() - offset as u64);
-                                // buf.set_position((offset + bi.offset + cd.length) as u64);
-                                // buf.set_position(offset as u64);
-                                // buf.seek(SeekFrom::Current(
-                                //     cd.length as i64 + cd.hashOffset as i64,
-                                // ))?;
                                 println!(
                                     "+ reading cd hash @ {} (hashOffset is: {})",
                                     buf.position() - offset as u64,
@@ -357,6 +359,8 @@ impl CodeSignature {
                                     hash_type.as_ref().unwrap(),
                                     hex::encode(cd_hash.as_ref().unwrap())
                                 );
+                                buf.set_position((offset + bi.offset + cd.hashOffset - (cd.hashSize as u32 * cd.nSpecialSlots)) as u64);
+                                cd.cd_hashes(buf)?;
                                 blobs.push(Blob::CodeDirectory {
                                     index: bi.clone(),
                                     code_directory: cd,
@@ -371,14 +375,21 @@ impl CodeSignature {
                                     "> CSMAGIC_BLOBWRAPPER {:?} {:x?} len: {}",
                                     bi, magic, length
                                 );
-                                blobs.push(Blob::Signed { index: bi.clone() });
+                                blobs.push(Blob::SignedData {
+                                     index: bi.clone(),
+                                     data: vec![]
+                                });
                             }
                             CSMAGIC_EMBEDDED_ENTITLEMENTS => {
                                 println!(
                                     "> CSMAGIC_EMBEDDED_ENTITLEMENETS {:?} {:x?} len: {}",
                                     bi, magic, length
                                 );
-                                blobs.push(Blob::Entitlements { index: bi.clone() });
+                                blobs.push(Blob::Entitlements {
+                                     index: bi.clone(),
+                                     entitlements_hash: vec![],
+                                     entitlements: vec![],
+                                });
                             }
                             _ => {
                                 println!("! UNHANDLED {:?} {:x?} len: {}", bi, magic, length);
