@@ -211,19 +211,17 @@ impl CodeDirectory {
         }
     }
 
-    pub fn cd_hash<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<u8>> {
-        let mut hash_buf = vec![0u8; self.hashSize as usize];
-        buf.read_exact(&mut hash_buf)?;
-        Ok(hash_buf)
+    /// collect CDHash for each slot index
+    pub fn cd_hashes<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<(i32, String)>> {
+        let hashes: Result<Vec<(i32, String)>> = (-(self.nSpecialSlots as i32)..self.nCodeSlots as i32).map(|i| {
+            let mut hash_buf = vec![0u8; self.hashSize as usize];
+            buf.read_exact(&mut hash_buf)?;
+            Ok((i, hex::encode(hash_buf)))
+        }).collect();
+        hashes
     }
 
-    pub fn cd_hashes<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<String>> {
-        (-(self.nSpecialSlots as i32)..self.nCodeSlots as i32).for_each(|i| {
-            println!("{} {}", i, hex::encode(self.cd_hash(buf).unwrap()));
-        });
-        Ok(vec![])
-    }
-
+    // /// Get the canonical slot name from slot  index
     // pub fn canonical_slot_name()
 }
 
@@ -240,8 +238,8 @@ pub enum Blob {
         team_id: Result<String>,
         /// Hash Type (e.g., "SHA-1", "SHA-256")
         hash_type: Option<String>,
-        /// CodeDirectory Hash value (CDHash)
-        cd_hash: Result<Vec<u8>>,
+        /// Code Directory Hash values (CDHash) for each slot index
+        cd_hashes: Result<Vec<(i32, String)>>,
     },
     Requirements {
         index: BlobIndex,
@@ -352,22 +350,15 @@ impl CodeSignature {
                                     buf.position() - offset as u64,
                                     cd.hashOffset
                                 );
-                                buf.set_position((offset + bi.offset + cd.hashOffset) as u64);
-                                let cd_hash = cd.cd_hash(buf);
-                                println!(
-                                    "+ cdhash: {} {}",
-                                    hash_type.as_ref().unwrap(),
-                                    hex::encode(cd_hash.as_ref().unwrap())
-                                );
                                 buf.set_position((offset + bi.offset + cd.hashOffset - (cd.hashSize as u32 * cd.nSpecialSlots)) as u64);
-                                cd.cd_hashes(buf)?;
+                                let cd_hashes = cd.cd_hashes(buf);
                                 blobs.push(Blob::CodeDirectory {
                                     index: bi.clone(),
                                     code_directory: cd,
                                     identifier: identifier,
                                     team_id: team_id,
                                     hash_type: hash_type,
-                                    cd_hash: Ok(cd_hash?.clone()),
+                                    cd_hashes: cd_hashes,
                                 });
                             }
                             CSMAGIC_BLOBWRAPPER => {
