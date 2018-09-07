@@ -5,7 +5,14 @@ pub mod errors;
 extern crate byteorder;
 extern crate hex;
 extern crate mach_object;
-extern crate slog;
+extern crate slog_stdlog;
+
+/// Re-export slog
+///
+/// Users of this library can, but don't have to use slog to build their own
+/// loggers
+#[macro_use]
+pub extern crate slog;
 
 #[macro_use]
 extern crate failure;

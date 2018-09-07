@@ -20,14 +20,15 @@ impl fmt::Display for SuperBlob {
 impl fmt::Display for CodeSignature {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
-            CodeSignature::Embedded {
+            CodeSignature {
+                logger: _,
                 offset,
                 size,
                 super_blob: Some(sb),
                 cd_blob_idx: _cd_blob_idx,
                 blobs: _blobs,
             } => {
-                write!(f, "Blob at offset {} ({} bytes) is an embedded signature of {} bytes, and {} blobs ", offset, size, sb.length, sb.count)?;
+                // write!(f, "Blob at offset {} ({} bytes) is an embedded signature of {} bytes, and {} blobs ", offset, size, sb.length, sb.count)?;
                 //                 write!(
                 //                     r"Blob 0: Type: {} @{}: Code Directory ({} bytes)
                 // Version:     {:x}

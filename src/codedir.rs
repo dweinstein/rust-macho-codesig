@@ -5,6 +5,10 @@
 
 use byteorder::{ByteOrder, NetworkEndian, ReadBytesExt};
 use hex;
+
+use slog::{Drain, Logger};
+use slog_stdlog;
+
 use std::io::{BufRead, Cursor, Read, Seek, SeekFrom};
 use std::str;
 
@@ -213,11 +217,14 @@ impl CodeDirectory {
 
     /// collect CDHash for each slot index
     pub fn cd_hashes<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<(i32, String)>> {
-        let hashes: Result<Vec<(i32, String)>> = (-(self.nSpecialSlots as i32)..self.nCodeSlots as i32).map(|i| {
-            let mut hash_buf = vec![0u8; self.hashSize as usize];
-            buf.read_exact(&mut hash_buf)?;
-            Ok((i, hex::encode(hash_buf)))
-        }).collect();
+        let hashes: Result<Vec<(i32, String)>> = (-(self.nSpecialSlots as i32)
+            ..self.nCodeSlots as i32)
+            .map(|i| {
+                let mut hash_buf = vec![0u8; self.hashSize as usize];
+                buf.read_exact(&mut hash_buf)?;
+                Ok((i, hex::encode(hash_buf)))
+            })
+            .collect();
         hashes
     }
 
@@ -247,7 +254,7 @@ pub enum Blob {
     Entitlements {
         index: BlobIndex,
         entitlements_hash: Vec<u8>,
-        entitlements: Vec<u8>
+        entitlements: Vec<u8>,
     },
     SignedData {
         index: BlobIndex,
@@ -259,22 +266,18 @@ pub enum Blob {
 }
 
 #[derive(Debug)]
-pub enum CodeSignature {
-    Embedded {
-        /// Offset
-        offset: u32,
-        /// Size
-        size: u32,
-        /// SuperBlob
-        super_blob: Option<SuperBlob>,
-        /// `BlobIndex` for `CodeDirectory`
-        cd_blob_idx: Option<BlobIndex>,
-        /// Vector of `Blob` objects
-        blobs: Vec<Blob>,
-    },
-    NotImplemented {
-        magic: u32,
-    },
+pub struct CodeSignature {
+    pub logger: Logger,
+    /// Offset
+    pub offset: u32,
+    /// Size
+    pub size: u32,
+    /// SuperBlob
+    pub super_blob: Option<SuperBlob>,
+    /// `BlobIndex` for `CodeDirectory`
+    pub cd_blob_idx: Option<BlobIndex>,
+    /// Vector of `Blob` objects
+    pub blobs: Option<Vec<Blob>>,
 }
 
 fn read_string_to_nul<T: AsRef<[u8]>>(buf: &mut Cursor<T>) -> Result<String> {
@@ -285,16 +288,20 @@ fn read_string_to_nul<T: AsRef<[u8]>>(buf: &mut Cursor<T>) -> Result<String> {
 
 impl CodeSignature {
     /// Load code signatures
-    pub fn load_code_signatures(_path: &str) -> Result<Vec<CodeSignature>> {
+    pub fn load_code_signatures<T: AsRef<[u8]>>(_path: &str) -> Result<Vec<CodeSignature>> {
         unimplemented!()
     }
 
     /// Parse a code signature
-    pub fn lc_code_sig<T: AsRef<[u8]>>(
+    pub fn parse<T: AsRef<[u8]>, L: Into<Option<Logger>>>(
+        logger: L,
         offset: u32,
         size: u32,
-        buf: &mut Cursor<T>
+        buf: &mut Cursor<T>,
     ) -> Result<CodeSignature> {
+        let log = logger
+            .into()
+            .unwrap_or(Logger::root(slog_stdlog::StdLog.fuse(), o!()));
         let _pos = buf.position();
         let magic = buf.read_u32::<NetworkEndian>()?;
         buf.seek(SeekFrom::Current(-4))?;
@@ -309,32 +316,33 @@ impl CodeSignature {
                 for idx in 0..super_blob.count as usize {
                     if let Some(bi) = &super_blob.index[idx] {
                         buf.set_position((offset + bi.offset) as u64);
-                        println!(
+                        debug!(
+                            log,
                             "=== blob index: typ {:?} @{}, byte offset {:?} ===",
                             bi.typ,
                             bi.offset,
                             offset + bi.offset
                         );
-
                         let magic = buf.read_u32::<NetworkEndian>()?;
                         let length = buf.read_u32::<NetworkEndian>()?;
                         buf.seek(SeekFrom::Current(-8))?;
                         match magic {
                             CSMAGIC_REQUIREMENTS => {
-                                println!(
-                                    "> CSMAGIC_REQUIREMENTS {:?} {:x?} len: {}",
-                                    bi, magic, length
+                                debug!(
+                                    log,
+                                    "> CSMAGIC_REQUIREMENTS {:?} {:x?} len: {}", bi, magic, length
                                 );
                                 blobs.push(Blob::Requirements { index: bi.clone() });
                             }
                             CSMAGIC_CODEDIRECTORY => {
-                                println!(
-                                    "> CSMAGIC_CODEDIRECTORY {:?} {:x?} len: {}",
-                                    bi, magic, length
+                                debug!(
+                                    log,
+                                    "> CSMAGIC_CODEDIRECTORY {:?} {:x?} len: {}", bi, magic, length
                                 );
                                 cd_blob_idx = Some(bi.clone());
                                 let cd = CodeDirectory::parse::<NetworkEndian, Cursor<T>>(buf)?;
-                                println!(
+                                debug!(
+                                    log,
                                     "+ CD.length {} bytes; end of cd {}/{}?",
                                     cd.length,
                                     buf.position(),
@@ -345,12 +353,17 @@ impl CodeSignature {
                                 buf.set_position((offset + bi.offset + cd.teamIDOffset) as u64);
                                 let team_id = cd.team_id(buf);
                                 let hash_type = Some(cd.hash_type_str()?.to_string());
-                                println!(
+                                debug!(
+                                    log,
                                     "+ reading cd hash @ {} (hashOffset is: {})",
                                     buf.position() - offset as u64,
                                     cd.hashOffset
                                 );
-                                buf.set_position((offset + bi.offset + cd.hashOffset - (cd.hashSize as u32 * cd.nSpecialSlots)) as u64);
+                                buf.set_position(
+                                    (offset + bi.offset + cd.hashOffset
+                                        - (cd.hashSize as u32 * cd.nSpecialSlots))
+                                        as u64,
+                                );
                                 let cd_hashes = cd.cd_hashes(buf);
                                 blobs.push(Blob::CodeDirectory {
                                     index: bi.clone(),
@@ -362,43 +375,46 @@ impl CodeSignature {
                                 });
                             }
                             CSMAGIC_BLOBWRAPPER => {
-                                println!(
-                                    "> CSMAGIC_BLOBWRAPPER {:?} {:x?} len: {}",
-                                    bi, magic, length
+                                debug!(
+                                    log,
+                                    "> CSMAGIC_BLOBWRAPPER {:?} {:x?} len: {}", bi, magic, length
                                 );
                                 blobs.push(Blob::SignedData {
-                                     index: bi.clone(),
-                                     data: vec![]
+                                    index: bi.clone(),
+                                    data: vec![],
                                 });
                             }
                             CSMAGIC_EMBEDDED_ENTITLEMENTS => {
-                                println!(
+                                debug!(
+                                    log,
                                     "> CSMAGIC_EMBEDDED_ENTITLEMENETS {:?} {:x?} len: {}",
-                                    bi, magic, length
+                                    bi,
+                                    magic,
+                                    length
                                 );
                                 blobs.push(Blob::Entitlements {
-                                     index: bi.clone(),
-                                     entitlements_hash: vec![],
-                                     entitlements: vec![],
+                                    index: bi.clone(),
+                                    entitlements_hash: vec![],
+                                    entitlements: vec![],
                                 });
                             }
                             _ => {
-                                println!("! UNHANDLED {:?} {:x?} len: {}", bi, magic, length);
+                                debug!(log, "! UNHANDLED {:?} {:x?} len: {}", bi, magic, length);
                                 blobs.push(Blob::Unknown { index: bi.clone() });
                             }
                         };
                     };
-                    println!("\n\n");
                 }
-                Ok(CodeSignature::Embedded {
+                Ok(CodeSignature {
+                    logger: log,
                     offset,
                     size,
                     super_blob: Some(super_blob),
                     cd_blob_idx: cd_blob_idx,
-                    blobs: blobs,
+                    blobs: Some(blobs),
                 })
             }
-            _ => Ok(CodeSignature::NotImplemented { magic: magic }),
+            _ => unimplemented!(),
         }
     }
 

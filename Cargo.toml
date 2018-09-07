@@ -7,6 +7,7 @@ authors = ["David Weinstein <dweinst@insitusec.com>"]
 mach_object = { git = "https://github.com/flier/rust-macho.git" }
 failure = "0.1"
 byteorder = "1.0"
-slog = "2.3.2"
+slog = "2"
 slog-bunyan = "2.1.0"
+slog-stdlog = "3"
 hex = "0.3.2"

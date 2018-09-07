@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate slog;
 extern crate slog_bunyan;
+extern crate slog_stdlog;
 
 #[macro_use]
 extern crate failure;
@@ -17,6 +18,7 @@ pub mod errors;
 pub use codedir::*;
 pub use consts::*;
 pub use mach_object::MachHeader;
+pub use slog::Logger;
 
 use slog::Drain;
 
@@ -34,36 +36,34 @@ pub fn main() -> Result<()> {
         o!("name" => "codesign"),
     );
 
-    let log = root.new(o!("child" => 1));
+    let log = root.new(o!());
 
     let args: Vec<String> = env::args().collect();
     let binary = &args[1];
-    trace!(
-        log,
-        "searching {binary} for macho headers/code signature command",
-        binary = binary
-    );
+    // trace!(
+    //     log,
+    //     "searching {binary} for macho headers/code signature command",
+    //     binary = binary
+    // );
     let mut f = File::open(binary).unwrap();
     let mut buf = Vec::new();
     let size = f.read_to_end(&mut buf).unwrap();
-
     let mut cur = Cursor::new(&buf[..size]);
+
     match &OFile::parse(&mut cur) {
-        Ok(OFile::MachFile { header, commands }) => handle_mach_file(header, commands, &mut cur)?,
+        Ok(OFile::MachFile { header, commands }) => {
+            handle_mach_file(log, header, commands, &mut cur)?
+        }
         Ok(OFile::FatFile { magic, files }) => {
             println!("FAT magic: 0x{:x}, files: {:?}", magic, files);
-            files.iter().for_each(|item| {
-                match &item {
-                    (
-                        _,
-                        OFile::MachFile {
-                            header,
-                            commands,
-                        },
-                    ) => handle_mach_file(header, commands, &mut cur),
-                    _ => { println!("{:?}", item); Ok(()) }
-                }.expect("macho");
-            });
+            for file in files {
+                match file {
+                    (_, OFile::MachFile { header, commands }) => {
+                        handle_mach_file(log.clone(), header, commands, &mut cur)?;
+                    }
+                    _ => println!("{:?}", file),
+                }
+            }
         }
         _ => unimplemented!(),
     }
@@ -72,6 +72,7 @@ pub fn main() -> Result<()> {
 }
 
 fn handle_mach_file<T: AsRef<[u8]>>(
+    logger: Logger,
     header: &MachHeader,
     commands: &Vec<MachCommand>,
     cur: &mut Cursor<T>,
@@ -82,19 +83,16 @@ fn handle_mach_file<T: AsRef<[u8]>>(
 
     for (i, &MachCommand(ref cmd, _cmdsize)) in commands.iter().enumerate() {
         if let LoadCommand::CodeSignature { 0: link } = &cmd {
-            println!(
-                "LC {}: LC_CODE_SIGNATURE        Offset: {}, Size: {}",
-                i, link.off, link.size
+            info!(
+                logger,
+                "LC {}: LC_CODE_SIGNATURE        Offset: {}, Size: {}", i, link.off, link.size
             );
             cur.set_position(link.off as u64);
-            let cs = CodeSignature::lc_code_sig(link.off, link.size, cur)?;
-            // println!("{:?}", cs);
-            println!("display CodeSignature: {}\n\n", cs);
-            if let CodeSignature::Embedded { blobs, .. } = cs {
-                blobs.iter().for_each(|blob| {
-                    println!("{:?}\n\n", blob);
-                });
-            }
+            let cs = CodeSignature::parse(logger.clone(), link.off, link.size, cur)?;
+            info!(logger, "{:?}", cs);
+            // cs.blobs.unwrap().iter().for_each(|blob| {
+            //     println!("BLOB {:?}\n\n", blob);
+            // });
         }
     }
     Ok(())
