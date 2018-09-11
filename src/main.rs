@@ -9,6 +9,7 @@ extern crate failure;
 extern crate byteorder;
 extern crate hex;
 extern crate mach_object;
+extern crate ring;
 
 pub mod codedir;
 pub mod consts;

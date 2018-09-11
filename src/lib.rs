@@ -6,6 +6,7 @@ extern crate byteorder;
 extern crate hex;
 extern crate mach_object;
 extern crate slog_stdlog;
+extern crate ring;
 
 /// Re-export slog
 ///

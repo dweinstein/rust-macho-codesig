@@ -5,6 +5,7 @@
 
 use byteorder::{ByteOrder, NetworkEndian, ReadBytesExt};
 use hex;
+use ring::digest;
 
 use slog::{Drain, Logger};
 use slog_stdlog;
@@ -228,6 +229,27 @@ impl CodeDirectory {
         hashes
     }
 
+    /// collect CDHash for each slot index
+    pub fn computed_cd_hashes<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<(i32, String)>> {
+        buf.set_position(0);
+        let page_size = 1 << self.pageSize;
+        let hashes: Result<Vec<(i32, String)>> = (0..self.nCodeSlots as i32)
+            .map(|i| {
+                let sz = if (buf.position() + page_size) > self.codeLimit as u64 {
+                   self.codeLimit as u64 - buf.position()
+                } else {
+                    page_size
+                };
+                let mut hash_buf = vec![0u8; sz as usize];
+                buf.read_exact(&mut hash_buf)?;
+                let digest = digest::digest(&digest::SHA256, &hash_buf);
+                Ok((i, hex::encode(digest)))
+            })
+            .collect();
+        println!("{:?}", hashes);
+        hashes
+    }
+
     // /// Get the canonical slot name from slot  index
     // pub fn canonical_slot_name()
 }
@@ -247,6 +269,8 @@ pub enum Blob {
         hash_type: Option<String>,
         /// Code Directory Hash values (CDHash) for each slot index
         cd_hashes: Result<Vec<(i32, String)>>,
+        /// Computed hashes
+        computed_cd_hashes: Result<Vec<(i32, String)>>,
     },
     Requirements {
         index: BlobIndex,
@@ -365,13 +389,17 @@ impl CodeSignature {
                                         as u64,
                                 );
                                 let cd_hashes = cd.cd_hashes(buf);
+
+                                let computed_cd_hashes = cd.computed_cd_hashes(buf);
+
                                 blobs.push(Blob::CodeDirectory {
                                     index: bi.clone(),
                                     code_directory: cd,
-                                    identifier: identifier,
-                                    team_id: team_id,
-                                    hash_type: hash_type,
-                                    cd_hashes: cd_hashes,
+                                    identifier,
+                                    team_id,
+                                    hash_type,
+                                    cd_hashes,
+                                    computed_cd_hashes
                                 });
                             }
                             CSMAGIC_BLOBWRAPPER => {
