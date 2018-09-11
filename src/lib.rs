@@ -5,8 +5,8 @@ pub mod errors;
 extern crate byteorder;
 extern crate hex;
 extern crate mach_object;
-extern crate slog_stdlog;
 extern crate ring;
+extern crate slog_stdlog;
 
 /// Re-export slog
 ///

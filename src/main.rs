@@ -41,11 +41,11 @@ pub fn main() -> Result<()> {
 
     let args: Vec<String> = env::args().collect();
     let binary = &args[1];
-    // trace!(
-    //     log,
-    //     "searching {binary} for macho headers/code signature command",
-    //     binary = binary
-    // );
+    trace!(
+        log,
+        "searching {binary} for macho headers/code signature command",
+        binary = binary
+    );
     let mut f = File::open(binary).unwrap();
     let mut buf = Vec::new();
     let size = f.read_to_end(&mut buf).unwrap();
@@ -80,7 +80,7 @@ fn handle_mach_file<T: AsRef<[u8]>>(
 ) -> Result<()> {
     assert_eq!(header.ncmds as usize, commands.len());
 
-    println!("macho header: {:?}", header);
+    info!(logger, "macho header: {:?}", header);
 
     for (i, &MachCommand(ref cmd, _cmdsize)) in commands.iter().enumerate() {
         if let LoadCommand::CodeSignature { 0: link } = &cmd {

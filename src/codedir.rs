@@ -230,13 +230,16 @@ impl CodeDirectory {
     }
 
     /// collect CDHash for each slot index
-    pub fn computed_cd_hashes<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Vec<(i32, String)>> {
+    pub fn computed_cd_hashes<T: AsRef<[u8]>>(
+        &self,
+        buf: &mut Cursor<T>,
+    ) -> Result<Vec<(i32, String)>> {
         buf.set_position(0);
         let page_size = 1 << self.pageSize;
         let hashes: Result<Vec<(i32, String)>> = (0..self.nCodeSlots as i32)
             .map(|i| {
                 let sz = if (buf.position() + page_size) > self.codeLimit as u64 {
-                   self.codeLimit as u64 - buf.position()
+                    self.codeLimit as u64 - buf.position()
                 } else {
                     page_size
                 };
@@ -246,7 +249,6 @@ impl CodeDirectory {
                 Ok((i, hex::encode(digest)))
             })
             .collect();
-        println!("{:?}", hashes);
         hashes
     }
 
@@ -399,7 +401,7 @@ impl CodeSignature {
                                     team_id,
                                     hash_type,
                                     cd_hashes,
-                                    computed_cd_hashes
+                                    computed_cd_hashes,
                                 });
                             }
                             CSMAGIC_BLOBWRAPPER => {
