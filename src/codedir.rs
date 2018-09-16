@@ -3,6 +3,8 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
+use hexdump;
+
 use byteorder::{ByteOrder, NetworkEndian, ReadBytesExt};
 use hex;
 use ring::digest;
@@ -245,11 +247,31 @@ impl CodeDirectory {
                 };
                 let mut hash_buf = vec![0u8; sz as usize];
                 buf.read_exact(&mut hash_buf)?;
-                let digest = digest::digest(&digest::SHA256, &hash_buf);
+                let digest_type = match self.hashType as u32 {
+                   CS_HASHTYPE_SHA1 => &digest::SHA1,
+                   CS_HASHTYPE_SHA256 => &digest::SHA256,
+                   _ => unimplemented!()
+                };
+                let digest = digest::digest(digest_type, &hash_buf);
                 Ok((i, hex::encode(digest)))
             })
             .collect();
         hashes
+    }
+
+    pub fn compute_cd_hash<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Option<String>> {
+      // calculate cd_hash
+      let mut hash_buf = vec![0u8; self.length as usize];
+      buf.read_exact(&mut hash_buf)?;
+      // hexdump::hexdump(&hash_buf);
+      let digest_type = match self.hashType as u32 {
+         CS_HASHTYPE_SHA1 => &digest::SHA1,
+         CS_HASHTYPE_SHA256 => &digest::SHA256,
+         _ => unimplemented!()
+      };
+      let digest = digest::digest(digest_type, &hash_buf);
+      let cd_hash = hex::encode(digest);
+      Ok(Some(cd_hash))
     }
 
     // /// Get the canonical slot name from slot  index
@@ -273,6 +295,8 @@ pub enum Blob {
         cd_hashes: Result<Vec<(i32, String)>>,
         /// Computed hashes
         computed_cd_hashes: Result<Vec<(i32, String)>>,
+        /// Computed CDHash
+        cd_hash: Option<String>,
     },
     Requirements {
         index: BlobIndex,
@@ -284,7 +308,8 @@ pub enum Blob {
     },
     SignedData {
         index: BlobIndex,
-        data: Vec<u8>,
+        data: Option<String>,
+        sha256_digest: Option<String>
     },
     Unknown {
         index: BlobIndex,
@@ -324,7 +349,7 @@ impl CodeSignature {
         offset: u32,
         size: u32,
         buf: &mut Cursor<T>,
-    ) -> Result<CodeSignature> {
+    ) -> Result<Option<CodeSignature>> {
         let log = logger
             .into()
             .unwrap_or(Logger::root(slog_stdlog::StdLog.fuse(), o!()));
@@ -365,6 +390,7 @@ impl CodeSignature {
                                     log,
                                     "> CSMAGIC_CODEDIRECTORY {:?} {:x?} len: {}", bi, magic, length
                                 );
+                                let pos = buf.position();
                                 cd_blob_idx = Some(bi.clone());
                                 let cd = CodeDirectory::parse::<NetworkEndian, Cursor<T>>(buf)?;
                                 debug!(
@@ -374,8 +400,14 @@ impl CodeSignature {
                                     buf.position(),
                                     buf.position() - offset as u64 - bi.offset as u64
                                 );
+
+                                // calculate cd_hash
+                                buf.set_position(pos);
+                                let cd_hash = cd.compute_cd_hash(buf)?;
+
                                 buf.set_position((offset + bi.offset + cd.identOffset) as u64);
                                 let identifier = read_string_to_nul(buf);
+
                                 buf.set_position((offset + bi.offset + cd.teamIDOffset) as u64);
                                 let team_id = cd.team_id(buf);
                                 let hash_type = Some(cd.hash_type_str()?.to_string());
@@ -402,6 +434,7 @@ impl CodeSignature {
                                     hash_type,
                                     cd_hashes,
                                     computed_cd_hashes,
+                                    cd_hash,
                                 });
                             }
                             CSMAGIC_BLOBWRAPPER => {
@@ -409,9 +442,14 @@ impl CodeSignature {
                                     log,
                                     "> CSMAGIC_BLOBWRAPPER {:?} {:x?} len: {}", bi, magic, length
                                 );
+                                let mut hash_buf = vec![0u8; length as usize];
+                                buf.read_exact(&mut hash_buf)?;
+                                // hexdump::hexdump(&hash_buf);
+                                let digest = digest::digest(&digest::SHA256, &hash_buf);
                                 blobs.push(Blob::SignedData {
                                     index: bi.clone(),
-                                    data: vec![],
+                                    data: None,
+                                    sha256_digest: Some(hex::encode(digest)),
                                 });
                             }
                             CSMAGIC_EMBEDDED_ENTITLEMENTS => {
@@ -435,27 +473,30 @@ impl CodeSignature {
                         };
                     };
                 }
-                Ok(CodeSignature {
+                Ok(Some(CodeSignature {
                     logger: log,
                     offset,
                     size,
                     super_blob: Some(super_blob),
                     cd_blob_idx: cd_blob_idx,
                     blobs: Some(blobs),
-                })
+                }))
             }
-            _ => unimplemented!(),
+            _ => {
+                info!(log, "Unhandled CS Magic: {:x?}", magic);
+                Ok(None)
+            }
         }
     }
 
     /// Sample code to locate the CodeDirectory from an embedded signature blob
-    pub fn find_code_directory(blob: &SuperBlob) -> Result<BlobIndex> {
+    pub fn find_code_directory(blob: &SuperBlob) -> Result<Option<BlobIndex>> {
         match blob.magic {
             CSMAGIC_EMBEDDED_SIGNATURE => {
                 for idx in 0..blob.count as usize {
                     if let Some(bi) = &blob.index[idx] {
                         if bi.typ == CSSLOT_CODEDIRECTORY {
-                            return Ok(bi.clone());
+                            return Ok(Some(bi.clone()))
                         }
                     }
                 }

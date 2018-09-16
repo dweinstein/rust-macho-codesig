@@ -18,6 +18,16 @@ pub const CSMAGIC_BLOBWRAPPER: u32 = 0xfade0b01;
 /// used for Entitlements blob
 pub const CSMAGIC_EMBEDDED_ENTITLEMENTS: u32 = 0xfade7171;
 
+// pub enum MagicTypes {
+//     Requirement = CSMAGIC_REQUIREMENT as isize,
+//     Requirements,
+//     CodeDirectory,
+//     EmbeddedSignature,
+//     DetachedSignature,
+//     BlobWrapper,
+//     EmbeddedEntitlements
+// }
+
 pub const CS_PAGE_SIZE: u32 = 4096;
 
 pub const CS_HASHTYPE_SHA1: u32 = 1;
