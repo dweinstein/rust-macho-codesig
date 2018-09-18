@@ -58,13 +58,14 @@ pub fn main() -> Result<()> {
             handle_mach_file(log, header, commands, &mut cur, 0 /* Not fat */)?
         }
         Ok(OFile::FatFile {
-            magic: _,
+            magic,
             files: ref slices,
         }) => {
+            trace!(log, "FAT magic: 0x{:x}, files: {:?}", magic, slices);
             for slice in slices {
                 match slice {
                     (FatArch { ref offset, .. }, OFile::MachFile { header, commands }) => {
-                        // println!("slice offset: {}", offset);
+                        trace!(log, "file offset: {}", offset);
                         cur.set_position(*offset as u64);
                         handle_mach_file(log.clone(), header, commands, &mut cur, *offset)?;
                     }
@@ -87,17 +88,23 @@ fn handle_mach_file<T: AsRef<[u8]>>(
 ) -> Result<()> {
     assert_eq!(header.ncmds as usize, commands.len());
 
-    // info!(log, "macho header: {:?} cur pos: {}", header, cur.position());
+    trace!(
+        log,
+        "macho header: {:?} cur pos: {}",
+        header,
+        cur.position()
+    );
     for (i, &MachCommand(ref cmd, _cmdsize)) in commands.iter().enumerate() {
         if let LoadCommand::CodeSignature { 0: link } = &cmd {
-            // info!(
-            //     log,
-            //     "LC {}: LC_CODE_SIGNATURE        Offset: {}, Size: {}", i, link.off, link.size
-            // );
+            info!(
+                log,
+                "LC {}: LC_CODE_SIGNATURE        Offset: {}, Size: {}", i, link.off, link.size
+            );
             cur.set_position(slice_offset as u64 + link.off as u64);
             if let Some(cs) =
                 CodeSignature::parse(log.clone(), slice_offset + link.off, link.size, cur)?
             {
+                trace!(log, "{:?}", cs);
                 cs.blobs.unwrap().iter().for_each(|ref blob| {
                     if let Blob::CodeDirectory { ref cd_hash, .. } = blob {
                         let cpuinfo = get_arch_name_from_types(header.cputype, header.cpusubtype)
