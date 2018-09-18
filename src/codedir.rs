@@ -248,9 +248,9 @@ impl CodeDirectory {
                 let mut hash_buf = vec![0u8; sz as usize];
                 buf.read_exact(&mut hash_buf)?;
                 let digest_type = match self.hashType as u32 {
-                   CS_HASHTYPE_SHA1 => &digest::SHA1,
-                   CS_HASHTYPE_SHA256 => &digest::SHA256,
-                   _ => unimplemented!()
+                    CS_HASHTYPE_SHA1 => &digest::SHA1,
+                    CS_HASHTYPE_SHA256 => &digest::SHA256,
+                    _ => unimplemented!(),
                 };
                 let digest = digest::digest(digest_type, &hash_buf);
                 Ok((i, hex::encode(digest)))
@@ -260,18 +260,18 @@ impl CodeDirectory {
     }
 
     pub fn compute_cd_hash<T: AsRef<[u8]>>(&self, buf: &mut Cursor<T>) -> Result<Option<String>> {
-      // calculate cd_hash
-      let mut hash_buf = vec![0u8; self.length as usize];
-      buf.read_exact(&mut hash_buf)?;
-      // hexdump::hexdump(&hash_buf);
-      let digest_type = match self.hashType as u32 {
-         CS_HASHTYPE_SHA1 => &digest::SHA1,
-         CS_HASHTYPE_SHA256 => &digest::SHA256,
-         _ => unimplemented!()
-      };
-      let digest = digest::digest(digest_type, &hash_buf);
-      let cd_hash = hex::encode(digest);
-      Ok(Some(cd_hash))
+        // calculate cd_hash
+        let mut hash_buf = vec![0u8; self.length as usize];
+        buf.read_exact(&mut hash_buf)?;
+        // hexdump::hexdump(&hash_buf);
+        let digest_type = match self.hashType as u32 {
+            CS_HASHTYPE_SHA1 => &digest::SHA1,
+            CS_HASHTYPE_SHA256 => &digest::SHA256,
+            _ => unimplemented!(),
+        };
+        let digest = digest::digest(digest_type, &hash_buf);
+        let cd_hash = hex::encode(digest);
+        Ok(Some(cd_hash))
     }
 
     // /// Get the canonical slot name from slot  index
@@ -309,7 +309,7 @@ pub enum Blob {
     SignedData {
         index: BlobIndex,
         data: Option<String>,
-        sha256_digest: Option<String>
+        sha256_digest: Option<String>,
     },
     Unknown {
         index: BlobIndex,
@@ -359,7 +359,16 @@ impl CodeSignature {
 
         match magic {
             CSMAGIC_EMBEDDED_SIGNATURE => {
+                let pre_blob = buf.position();
                 let super_blob = SuperBlob::parse::<NetworkEndian, Cursor<T>>(buf)?;
+                // let post_blob = buf.position();
+
+                buf.set_position(pre_blob);
+                let mut hash_buf = vec![0u8; super_blob.length as usize];
+                buf.read_exact(&mut hash_buf)?;
+                let digest = digest::digest(&digest::SHA256, &hash_buf);
+
+                info!(log, "SIGNATURE DIGEST {}", hex::encode(digest));
 
                 let mut blobs: Vec<Blob> = vec![];
                 let mut cd_blob_idx: Option<BlobIndex> = None;
@@ -442,6 +451,7 @@ impl CodeSignature {
                                     log,
                                     "> CSMAGIC_BLOBWRAPPER {:?} {:x?} len: {}", bi, magic, length
                                 );
+                                buf.set_position(offset as u64 + bi.offset as u64);
                                 let mut hash_buf = vec![0u8; length as usize];
                                 buf.read_exact(&mut hash_buf)?;
                                 // hexdump::hexdump(&hash_buf);
@@ -496,7 +506,7 @@ impl CodeSignature {
                 for idx in 0..blob.count as usize {
                     if let Some(bi) = &blob.index[idx] {
                         if bi.typ == CSSLOT_CODEDIRECTORY {
-                            return Ok(Some(bi.clone()))
+                            return Ok(Some(bi.clone()));
                         }
                     }
                 }
