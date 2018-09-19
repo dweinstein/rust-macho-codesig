@@ -109,7 +109,7 @@ fn handle_mach_file<T: AsRef<[u8]>>(
                     if let Blob::CodeDirectory { ref cd_hash, .. } = blob {
                         let cpuinfo = get_arch_name_from_types(header.cputype, header.cpusubtype)
                             .unwrap_or("unk");
-                        info!(log, "cs cpu {} cd_hash: {:?}\n\n", cpuinfo, cd_hash);
+                        info!(log, "code signature"; "cd_hash" => cd_hash, "cpuinfo" => cpuinfo);
                     }
                 });
             } else {
